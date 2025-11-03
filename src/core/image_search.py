@@ -67,7 +67,83 @@ def walk_fs(fs, path="/"):
         else:
             yield "/" + full_path
 
+def extract_file_metadata(file_obj, file_path):
+    """Extract metadata from a file object."""
+    size = file_obj.info.meta.size if file_obj.info.meta else 0
+    file_name = file_path.split('/')[-1] if '/' in file_path else file_path
+    
+    # Extract timestamps if available
+    created_time = None
+    modified_time = None
+    accessed_time = None
+    
+    if file_obj.info.meta:
+        if hasattr(file_obj.info.meta, 'crtime') and file_obj.info.meta.crtime:
+            created_time = datetime.datetime.fromtimestamp(file_obj.info.meta.crtime)
+        if hasattr(file_obj.info.meta, 'mtime') and file_obj.info.meta.mtime:
+            modified_time = datetime.datetime.fromtimestamp(file_obj.info.meta.mtime)
+        if hasattr(file_obj.info.meta, 'atime') and file_obj.info.meta.atime:
+            accessed_time = datetime.datetime.fromtimestamp(file_obj.info.meta.atime)
+    
+    return size, file_name, created_time, modified_time, accessed_time
+
+def compute_file_hash(file_obj, size):
+    """Compute SHA256 hash of file data."""
+    import hashlib
+    data = file_obj.read_random(0, size) if size else b""
+    return hashlib.sha256(data).hexdigest()
+
+def create_finding(file_hash, file_path, size, file_name, partition_offset, 
+                  created_time, modified_time, accessed_time):
+    """Create a Finding object with the provided metadata."""
+    return Finding(
+        hash_value=file_hash,
+        file_path=file_path,
+        file_size=size,
+        file_name=file_name,
+        partition_offset=partition_offset,
+        created_time=created_time,
+        modified_time=modified_time,
+        accessed_time=accessed_time
+    )
+
+def process_single_file(file_path, fs, hashes, partition_offset, logger):
+    """Process a single file and return a Finding if hash matches."""
+    try:
+        logger.debug(f"Processing file: {file_path}")
+        file_obj = fs.open(file_path)
+        
+        # Extract metadata
+        size, file_name, created_time, modified_time, accessed_time = extract_file_metadata(file_obj, file_path)
+        
+        # Compute hash
+        file_hash = compute_file_hash(file_obj, size)
+        
+        # Check if hash matches
+        if file_hash in hashes:
+            logger.info(f"Found matching file for hash << {file_hash[0:5]}...{file_hash[-6:-1]} >> at {file_path}")
+            return create_finding(file_hash, file_path, size, file_name, partition_offset,
+                                created_time, modified_time, accessed_time)
+        
+        return None
+        
+    except Exception as e:
+        logger.warning(f"Error processing file {file_path}: {e}")
+        return None
+
+def report_progress(processed_files, matches_found, start_time, last_progress_time, 
+                   progress_interval, logger):
+    """Report search progress if enough time has elapsed."""
+    current_time = time.time()
+    if current_time - last_progress_time >= progress_interval:
+        elapsed_time = current_time - start_time
+        files_per_second = processed_files / elapsed_time
+        logger.info(f"Search progress: {processed_files} files processed, {matches_found} matches found ({files_per_second:.1f} files/sec)")
+        return current_time
+    return last_progress_time
+
 def search_filesystem(fs, hashes, partition_offset=None) -> List[Finding]:
+    """Search a filesystem for matching hashes and return findings."""
     logger = get_logger()
     findings = []
     
@@ -80,62 +156,18 @@ def search_filesystem(fs, hashes, partition_offset=None) -> List[Finding]:
     logger.info("Starting filesystem search...")
     
     for file_path in walk_fs(fs):
-        try:
-            logger.debug(f"Processing file: {file_path}")
-            file_obj = fs.open(file_path)
-            
-            # Get file metadata
-            size = file_obj.info.meta.size if file_obj.info.meta else 0
-            file_name = file_path.split('/')[-1] if '/' in file_path else file_path
-            
-            # Extract timestamps if available
-            created_time = None
-            modified_time = None
-            accessed_time = None
-            
-            if file_obj.info.meta:
-                if hasattr(file_obj.info.meta, 'crtime') and file_obj.info.meta.crtime:
-                    created_time = datetime.datetime.fromtimestamp(file_obj.info.meta.crtime)
-                if hasattr(file_obj.info.meta, 'mtime') and file_obj.info.meta.mtime:
-                    modified_time = datetime.datetime.fromtimestamp(file_obj.info.meta.mtime)
-                if hasattr(file_obj.info.meta, 'atime') and file_obj.info.meta.atime:
-                    accessed_time = datetime.datetime.fromtimestamp(file_obj.info.meta.atime)
-            
-            # Read file data and compute hash
-            data = file_obj.read_random(0, size) if size else b""
-            import hashlib
-            file_hash = hashlib.sha256(data).hexdigest()
-            
-            if file_hash in hashes:
-                matches_found += 1
-                
-                # Create Finding object
-                finding = Finding(
-                    hash_value=file_hash,
-                    file_path=file_path,
-                    file_size=size,
-                    file_name=file_name,
-                    partition_offset=partition_offset,
-                    created_time=created_time,
-                    modified_time=modified_time,
-                    accessed_time=accessed_time
-                )
-                
-                findings.append(finding)
-                logger.info(f"Found matching file for hash << {file_hash[0:5]}...{file_hash[-6:-1]} >> at {file_path}")
-                
-        except Exception as e:
-            logger.warning(f"Error processing file {file_path}: {e}")
+        # Process the file
+        finding = process_single_file(file_path, fs, hashes, partition_offset, logger)
+        
+        if finding:
+            findings.append(finding)
+            matches_found += 1
         
         processed_files += 1
         
-        # Report progress periodically with rate information
-        current_time = time.time()
-        if current_time - last_progress_time >= progress_interval:
-            elapsed_time = current_time - start_time
-            files_per_second = processed_files / elapsed_time
-            logger.info(f"Search progress: {processed_files} files processed, {matches_found} matches found ({files_per_second:.1f} files/sec)")
-            last_progress_time = current_time
+        # Report progress periodically
+        last_progress_time = report_progress(processed_files, matches_found, start_time, 
+                                           last_progress_time, progress_interval, logger)
     
     # Final report
     total_time = time.time() - start_time
