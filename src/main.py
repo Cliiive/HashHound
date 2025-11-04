@@ -44,7 +44,7 @@ def main():
         return 1
     
     # wait for user to press enter
-    input("\n\nPress Enter to start the forensic analysis...")
+    input("\n\nPlease check your parameters, then press Enter to start the forensic analysis.\n")
 
     # Perform the forensic search
     logger.info("Starting forensic analysis...")

@@ -114,7 +114,7 @@ class ForensicReportGenerator:
         # Build the PDF
         doc.build(story)
         
-        self.logger.info(f"Forensic report generated: {output_path}")
+        self.logger.debug(f"Forensic report generated: {output_path}")
         return output_path
     
     def _create_header(self, investigator_name: str, evidence_path: str, case_number: Optional[str] = None):

@@ -202,18 +202,48 @@ def search_filesystem(fs, hashes, partition_offset=None) -> List[Finding]:
     
     return findings
 
+#### LOGGING ####
+
+# ANSI color codes
+RESET = "\033[0m"
+BOLD = "\033[1m"
+RED = "\033[31m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+CYAN = "\033[36m"
+MAGENTA = "\033[35m"
+
+def format_number(n):
+    return f"{n:,}"
+
 def log_stats(start_time):
     global FOUND_FILES, SEARCHED_FILES, STOP_LOGGING
     time.sleep(0.5)
-    print("")
+    
+    # Print table header once
+    header = (
+        f"{BOLD}{CYAN}|| {'START TIME':^10} || {'ELAPSED':^10} || "
+        f"{'FOUND FILES':^15} || {'SEARCHED FILES':^15} ||{RESET}"
+    )
+    separator = f"{BOLD}{CYAN}||{'_'*12}||{'_'*12}||{'_'*17}||{'_'*17}||{RESET}"
+    
+    print("\n" + header)
+    print(separator)
+    
     while not STOP_LOGGING:
         elapsed = time.time() - start_time
-        sys.stdout.write(
-            f"\r|STARTTIME: {time.strftime('%H:%M:%S', time.localtime(start_time))}"
-            f"|TIME SINCE START: {elapsed:8.3f}s"
-            f"|FOUND FILES: {FOUND_FILES}"
-            f"|SEARCHED FILES: {SEARCHED_FILES}|"
+        elapsed_str = f"{int(elapsed//3600):02}:{int((elapsed%3600)//60):02}:{int(elapsed%60):02}"
+        
+        line = (
+            f"{BOLD}{CYAN}||{RESET} "
+            f"{YELLOW}{time.strftime('%H:%M:%S', time.localtime(start_time)):^10}{RESET} || "
+            f"{MAGENTA}{elapsed_str:^10}{RESET} || "
+            f"{GREEN}{format_number(FOUND_FILES):^15}{RESET} || "
+            f"{RED}{format_number(SEARCHED_FILES):^15}{RESET} ||"
         )
+        
+        # Overwrite previous line
+        sys.stdout.write(f"\r{line}")
         sys.stdout.flush()
-        time.sleep(0.01)  # update every 200ms
-    print()  # move to new line when done
+        time.sleep(0.2)
+    print("\n")
